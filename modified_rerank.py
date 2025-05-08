@@ -70,6 +70,43 @@ class FaissVectorStoreComponent(LCVectorStoreComponent):
 
     # ...existing code...
 
+    @staticmethod
+    def resolve_path(path: str) -> str:
+        """Resolve the path relative to the Langflow root.
+
+        Args:
+            path: The path to resolve
+        Returns:
+            str: The resolved path as a string
+        """
+        return str(Path(path).resolve())
+    
+    def get_persist_directory(self) -> Path:
+        """Returns the resolved persist directory path or the current directory if not set."""
+        if self.persist_directory:
+            return Path(self.resolve_path(self.persist_directory))
+        return Path()
+    
+    @check_cached_vector_store
+    def build_vector_store(self) -> FAISS:
+        """Builds the FAISS vector store."""
+        path = self.get_persist_directory()
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Convert DataFrame to Data if needed using parent's method
+        self.ingest_data = self._prepare_ingest_data()
+
+        documents = []
+        for _input in self.ingest_data or []:
+            if isinstance(_input, Data):
+                documents.append(_input.to_lc_document())
+            else:
+                documents.append(_input)
+
+        faiss = FAISS.from_documents(documents=documents, embedding=self.embedding)
+        faiss.save_local(str(path), self.index_name)
+        return faiss
+
     def search_documents(self) -> list[Data]:
         """Search for documents in the FAISS vector store."""
         path = self.get_persist_directory()

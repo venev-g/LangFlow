@@ -1,0 +1,28 @@
+Q1: What are the functions covered in the scope of the Policy Management System?
+Expected Answer: A list including Policy Creation, Endorsement, Cancellation, Renewal,HR ROLLBACK etc.
+
+
+Q2: What does “policy endorsement” mean, and where is it described?
+Expected Answer: Section 4 (Functional Requirements) defines policy endorsement as member addition/deletion, etc.
+
+Q3: What are the integration points for the PMS?
+Expected Answer: Real-time integration with Claims, Underwriting, CRM, DMS, etc 
+
+Q4: How does the system handle policy endorsements and cancellations with audit tracking?
+Expected Answer: Mentions of endorsements in Section 4, cancellations with claims check, and audit logging in Section 8.
+
+Section 2:
+
+
+Q5: Retrieve all sections where 'propensity-based upsell' is discussed.
+ Expected Answer:   Sections  2.1 (Project Overview) ,  2.2 (Upsell Criteria Rules) ,  2.3 (Propensity Data Flow) .  
+
+Q6: Find rules related to increasing Sum Insured for Activ Health policies. 
+ Expected Answer:    Activ Health rules  from  Section 2.2  (Age ≤45, Max SI = 25L, PED flagged = No).  
+
+
+Q7: Explain how GHD affects policy underwriting.  
+ Expected Answer:    Section 2.6  (If GHD=Yes → NSTP; if No → No action).  
+
+Q8: What happens if a customer on auto-debit renews via the portal?"
+ Expected Answer:    Combines  Section 2.5 (Auto-Debit Warning)  +  Section 2.1 (Renewal Process) .
