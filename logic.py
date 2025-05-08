@@ -1,78 +1,127 @@
-from langchain.document_loaders import TextLoader
-from langchain.text_splitter import SpacyTextSplitter, TokenTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
-from pathlib import Path
+# RAG ETL Pipeline using unstructured, FAISS, and Hybrid Search
 
-# ----------------------------
-# 1. Design logic:
-# ----------------------------
-# - Load documents from source (e.g. text files, PDFs).
-# - First apply a semantic text splitter (Spacy) to break into coherent sentence-based chunks.
-# - Then apply a token-based text splitter to ensure each chunk is within model limits.
-# - Compute embeddings for final chunks.
-# - Store embeddings in FAISS vector store for fast nearest-neighbor retrieval.
-# - Persist the index to disk for reuse.
+import os
+from typing import List, Tuple
+from unstructured.partition.auto import partition
+from unstructured.documents.elements import Table
+from sentence_transformers import SentenceTransformer
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import faiss
+import numpy as np
+import json
+from rank_bm25 import BM25Okapi
 
-# ----------------------------
-# 2. Implementation
-# ----------------------------
+# Load and partition document using sections and extract tables
 
-def build_faiss_index(
-    docs_path: str,
-    spacy_model: str = "en_core_web_sm",
-    semantic_chunk_size: int = 1000,
-    semantic_overlap: int = 100,
-    token_chunk_size: int = 500,
-    token_overlap: int = 50,
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-    index_path: str = "faiss_index"
-) -> FAISS:
-    # 2.1 Load raw documents
-    loader = TextLoader(docs_path)
-    docs = loader.load()
+def load_and_partition(file_path: str):
+    elements = partition(filename=file_path, strategy="hi_res")
+    content_elements = []
+    for el in elements:
+        if isinstance(el, Table):
+            content_elements.append(el.text.strip())
+        elif el.text and el.category not in ("Figure"):
+            content_elements.append(el)
+    return elements
 
-    # 2.2 Semantic splitting (sentence-level coherence)
-    semantic_splitter = SpacyTextSplitter(
-        model=spacy_model,
-        chunk_size=semantic_chunk_size,
-        chunk_overlap=semantic_overlap
-    )
-    sem_chunks = semantic_splitter.split_documents(docs)
+# Chunking by title sections and then by semantic split with metadata tracking
 
-    # 2.3 Token-based splitting (ensure token limits)
-    token_splitter = TokenTextSplitter(
-        chunk_size=token_chunk_size,
-        chunk_overlap=token_overlap
-    )
-    final_chunks = token_splitter.split_documents(sem_chunks)
+def chunk_elements_by_title_semantic(elements, max_chars=512, overlap=50):
+    chunks = []
+    metadata = []
+    current_section = []
+    current_title = "Introduction"
+    current_page = None
 
-    # 2.4 Embed and index
-    embed = HuggingFaceEmbeddings(model_name=embedding_model)
-    vectorstore = FAISS.from_documents(final_chunks, embed)
+    for el in elements:
+        if hasattr(el, "category") and "title" in el.category.lower():
+            if current_section:
+                section_chunks = semantic_chunk(current_section, max_chars, overlap)
+                for chunk in section_chunks:
+                    metadata.append({
+                        "section_title": current_title,
+                        "page_number": current_page,
+                        "element_type": "text"
+                    })
+                    chunks.append(chunk)
+                current_section = []
+            current_title = el.text.strip()
+            current_page = getattr(el.metadata, "page_number", None)
 
-    # 2.5 Persist
-    Path(index_path).mkdir(exist_ok=True)
-    faiss_index_file = Path(index_path) / "index.faiss"
-    vectorstore.save_local(str(index_path))
-    print(f"FAISS index saved to {index_path}")
+        if hasattr(el, "text"):
+            current_section.append(el.text.strip())
+            if current_page is None:
+                current_page = getattr(el.metadata, "page_number", None)
+        elif isinstance(el, str):
+            current_section.append(el)
 
-    return vectorstore
+    if current_section:
+        section_chunks = semantic_chunk(current_section, max_chars, overlap)
+        for chunk in section_chunks:
+            metadata.append({
+                "section_title": current_title,
+                "page_number": current_page,
+                "element_type": "text"
+            })
+            chunks.append(chunk)
 
-# Example usage
+    return chunks, metadata
+
+def semantic_chunk(texts: List[str], max_chars: int, overlap: int):
+    full_text = "\n".join(texts)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=max_chars, chunk_overlap=overlap)
+    return splitter.split_text(full_text)
+
+# Embed chunks
+
+def embed_chunks(chunks: List[str], model_name="all-MiniLM-L6-v2"):
+    model = SentenceTransformer(model_name)
+    embeddings = model.encode(chunks, show_progress_bar=True)
+    return embeddings, model
+
+# Store embeddings in FAISS with metadata
+
+def store_faiss_index(embeddings, chunks, metadata, index_path="faiss.index", meta_path="metadata.json"):
+    dim = len(embeddings[0])
+    index = faiss.IndexFlatL2(dim)
+    index.add(np.array(embeddings).astype('float32'))
+    faiss.write_index(index, index_path)
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump({"chunks": chunks, "metadata": metadata}, f)
+
+    return index
+
+# Build BM25 index for hybrid search
+
+def build_bm25_index(chunks: List[str]):
+    tokenized_corpus = [chunk.split() for chunk in chunks]
+    return BM25Okapi(tokenized_corpus)
+
+# Hybrid Search (BM25 + FAISS)
+
+def hybrid_search(query: str, model, faiss_index, bm25, chunks: List[str], top_k=5):
+    # FAISS semantic search
+    q_vec = model.encode([query])
+    D, I = faiss_index.search(np.array(q_vec).astype('float32'), top_k)
+    semantic_hits = [chunks[i] for i in I[0]]
+
+    # BM25 keyword search
+    bm25_hits = bm25.get_top_n(query.split(), chunks, n=top_k)
+
+    # Combine and rerank (naive merge)
+    combined = list(dict.fromkeys(semantic_hits + bm25_hits))[:top_k]
+    return combined
+
+# === Example Usage ===
 if __name__ == "__main__":
-    INDEX = build_faiss_index(
-        docs_path="./data/my_docs.txt",
-        spacy_model="en_core_web_sm",
-        semantic_chunk_size=1000,
-        semantic_overlap=100,
-        token_chunk_size=500,
-        token_overlap=50,
-        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-        index_path="./faiss_index"
-    )
-    # Now you can perform retrieval for RAG:
-    query = "What are the main benefits of AI-powered smart glasses?"
-    docs = INDEX.similarity_search(query, k=5)
-    for d in docs:
-        print(d.page_content)
+    file_path = "sample.docx"  # or .pdf
+    elements = load_and_partition(file_path)
+    chunks, metadata = chunk_elements_by_title_semantic(elements)
+    embeddings, model = embed_chunks(chunks)
+    index = store_faiss_index(embeddings, chunks, metadata)
+    bm25 = build_bm25_index(chunks)
+
+    # Test hybrid query
+    results = hybrid_search("What are the side effects?", model, index, bm25, chunks)
+    for i, res in enumerate(results, 1):
+        print(f"[{i}] {res[:200]}\n")
