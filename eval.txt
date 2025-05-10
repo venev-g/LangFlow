@@ -11,8 +11,8 @@ Expected Answer: Real-time integration with Claims, Underwriting, CRM, DMS, etc
 Q4: How does the system handle policy endorsements and cancellations with audit tracking?
 Expected Answer: Mentions of endorsements in Section 4, cancellations with claims check, and audit logging in Section 8.
 
-Section 2:
 
+Section 2:
 
 Q5: Retrieve all sections where 'propensity-based upsell' is discussed.
  Expected Answer:   Sections  2.1 (Project Overview) ,  2.2 (Upsell Criteria Rules) ,  2.3 (Propensity Data Flow) .  
@@ -25,4 +25,10 @@ Q7: Explain how GHD affects policy underwriting.
  Expected Answer:    Section 2.6  (If GHD=Yes → NSTP; if No → No action).  
 
 Q8: What happens if a customer on auto-debit renews via the portal?"
- Expected Answer:    Combines  Section 2.5 (Auto-Debit Warning)  +  Section 2.1 (Renewal Process) .
+ Expected Answer:    Combines  Section 2.5 (Auto-Debit Warning)  +  Section 2.1 (Renewal Process)
+
+
+Very Unstructured Document:
+
+1. Give me sample HR scenarios.
+2. What are the Revised process for HR Redemption in Jarvis?
